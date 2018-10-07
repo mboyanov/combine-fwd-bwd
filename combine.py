@@ -3,11 +3,6 @@ from fastai.text import *
 import torch
 
 vocab_size = 1000
-embedding_size = 3
-n_hid = 70
-n_layers = 3
-lm = RNNCore(vocab_size, embedding_size, n_hid, n_layers, 0)
-lm2 = RNNCore(vocab_size, embedding_size, n_hid, n_layers, 0)
 
 
 def extract_embedding_layer(rnn_core):
@@ -26,8 +21,32 @@ class CombinedLM(nn.Module):
         super().__init__()
         self.core = RNNCore(vocab_size, fwd.emb_sz + bwd.emb_sz,
                             fwd.n_hid + bwd.n_hid,
-                            fwd.n_layers, 0)
+                            fwd.n_layers, 0, bidir=True)
         self._combine_embedding(fwd, bwd)
+        self._combine_rnns(fwd, bwd)
 
+    def _combine_rnns(self, fwd, bwd):
+        combined_rnn_0 = self.core.rnns[0]
+        fwd_rnn_0 = fwd.rnns[0]
+        bwd_rnn_0 = bwd.rnns[0]
+        fwd_weights = fwd_rnn_0.module.weight_ih_l0.data
+        bwd_weights = bwd_rnn_0.module.weight_ih_l0.data
+        combined_rnn_0.module.weight_ih_l0.data.set_(
+            torch.cat((
+                fwd_weights,
+                torch.zeros(fwd_weights.size())
+            ), dim =1)
+        )
+        combined_rnn_0.module.weight_ih_l0_reverse.data.set_(
+            torch.cat((
+                torch.zeros(bwd_weights.size()),
+                bwd_weights
+            ), dim=1)
+        )
 
-combined_lm = CombinedLM(lm, lm2)
+    def forward(self, input):
+        self.core.reset()
+        return self.core.forward(input)
+
+    def reset(self):
+        self.core.reset()
